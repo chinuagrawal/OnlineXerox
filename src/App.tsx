@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import axios from "axios";
 import { storage, db } from "./firebase.ts";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { v4 as uuidv4 } from "uuid";
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+
 import {
   Menu,
   CloudUpload,
@@ -619,20 +623,23 @@ const CheckoutView = ({
     setPaying(true);
 
     try {
-      // Simulate payment processing
-      setTimeout(async () => {
-        const ordersRef = collection(db, "orders");
-        await addDoc(ordersRef, {
-          ...orderData,
-          paymentStatus: "paid",
-          status: "queued",
-          paidAt: serverTimestamp(),
-        });
-        onNext();
+      // Call PhonePe V2 Backend API
+      const response = await axios.post(`${BACKEND_URL}/api/pay`, {
+        amount: orderData.amount,
+        merchantUserId: "USER-" + uuidv4().slice(0, 8),
+        orderData: orderData,
+      });
+
+      if (response.data.success && response.data.redirectUrl) {
+        // Redirect to PhonePe Payment Page
+        window.location.href = response.data.redirectUrl;
+      } else {
+        alert("Payment initiation failed. Please try again.");
         setPaying(false);
-      }, 2000);
+      }
     } catch (error) {
-      console.error(error);
+      console.error("Payment Error:", error);
+      alert("Something went wrong. Please check your connection.");
       setPaying(false);
     }
   };
@@ -1193,8 +1200,39 @@ export default function App() {
     window.scrollTo(0, 0);
   }, [view]);
 
+  // Handle return from PhonePe
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const txnId = urlParams.get("txnId");
+    const storedOrder = localStorage.getItem("pendingOrder");
+
+    if (txnId && storedOrder) {
+      const order = JSON.parse(storedOrder);
+      // Add to Firestore if it hasn't been added yet
+      const saveOrder = async () => {
+        try {
+          const ordersRef = collection(db, "orders");
+          await addDoc(ordersRef, {
+            ...order,
+            txnId,
+            paymentStatus: "paid",
+            status: "queued",
+            paidAt: serverTimestamp(),
+          });
+          setOrderData({ ...order, orderId: txnId });
+          setView("status");
+          localStorage.removeItem("pendingOrder");
+        } catch (err) {
+          console.error("Firestore Error:", err);
+        }
+      };
+      saveOrder();
+    }
+  }, []);
+
   const handleUploadComplete = (data: any) => {
     setOrderData(data);
+    localStorage.setItem("pendingOrder", JSON.stringify(data));
     setView("checkout");
   };
 

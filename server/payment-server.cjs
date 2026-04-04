@@ -1,8 +1,12 @@
 const express = require("express");
-const axios = require("axios");
-const crypto = require("crypto");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+const {
+  StandardCheckoutClient,
+  Env,
+  StandardCheckoutPayRequest,
+} = require("@phonepe-pg/pg-sdk-node");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 app.use(cors());
@@ -12,68 +16,77 @@ app.use(bodyParser.json());
 const MERCHANT_ID = process.env.PHONEPE_MERCHANT_ID || "YOUR_MERCHANT_ID";
 const SALT_KEY = process.env.PHONEPE_SALT_KEY || "YOUR_SALT_KEY";
 const SALT_INDEX = process.env.PHONEPE_SALT_INDEX || 1;
-const PHONEPE_API_URL =
-  process.env.PHONEPE_API_URL ||
-  "https://api-preprod.phonepe.com/apis/pg-sandbox/pg/v1/pay";
+const ENV =
+  process.env.PHONEPE_ENV === "PRODUCTION" ? Env.PRODUCTION : Env.SANDBOX;
 
-const REDIRECT_URL = process.env.FRONTEND_URL
-  ? `${process.env.FRONTEND_URL}/status`
-  : "http://localhost:3000/status";
-const CALLBACK_URL = process.env.BACKEND_URL
-  ? `${process.env.BACKEND_URL}/api/callback`
-  : "https://your-domain.com/api/callback";
+// Initialize PhonePe SDK Client (V2 flow)
+const client = StandardCheckoutClient.getInstance(
+  MERCHANT_ID,
+  SALT_KEY,
+  SALT_INDEX,
+  ENV,
+);
+
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
 
 app.post("/api/pay", async (req, res) => {
-  const { amount, transactionId, merchantUserId } = req.body;
-
-  const payload = {
-    merchantId: MERCHANT_ID,
-    merchantTransactionId: transactionId,
-    merchantUserId: merchantUserId,
-    amount: amount * 100, // Amount in paise
-    redirectUrl: REDIRECT_URL,
-    redirectMode: "REDIRECT",
-    callbackUrl: CALLBACK_URL,
-    paymentInstrument: {
-      type: "PAY_PAGE",
-    },
-  };
-
-  const payloadString = JSON.stringify(payload);
-  const base64Payload = Buffer.from(payloadString).toString("base64");
-  const stringToSign = base64Payload + "/pg/v1/pay" + SALT_KEY;
-  const sha256 = crypto.createHash("sha256").update(stringToSign).digest("hex");
-  const xVerify = sha256 + "###" + SALT_INDEX;
+  const { amount, merchantUserId, orderData } = req.body;
+  const merchantTransactionId = `TXN-${uuidv4().slice(0, 8).toUpperCase()}`;
 
   try {
-    const response = await axios.post(
-      PHONEPE_API_URL,
-      {
-        request: base64Payload,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-VERIFY": xVerify,
-          accept: "application/json",
-        },
-      },
-    );
+    // Build the V2 Checkout Request
+    const request = StandardCheckoutPayRequest.builder()
+      .merchantOrderId(merchantTransactionId)
+      .amount(Math.round(parseFloat(amount) * 100)) // Amount in paise
+      .redirectUrl(`${FRONTEND_URL}/status?txnId=${merchantTransactionId}`)
+      // In V2 flow, we can pass additional metadata if needed
+      .build();
 
-    res.json(response.data);
+    const response = await client.pay(request);
+
+    // Send back the redirect URL to the frontend
+    res.json({
+      success: true,
+      redirectUrl: response.redirectUrl,
+      merchantTransactionId: merchantTransactionId,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
+    console.error("PhonePe V2 Error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // Callback/Webhook endpoint for real payment verification
-app.post("/api/callback", (req, res) => {
-  // Verify checksum and update Firestore order status here
-  res.sendStatus(200);
+app.post("/api/callback", async (req, res) => {
+  const authHeader = req.headers["authorization"];
+  const callbackBody = JSON.stringify(req.body);
+
+  try {
+    // Validate the callback using SDK (V2)
+    // Note: You need your configured webhook username/password from PhonePe dashboard
+    const isValid = client.validateCallback(
+      process.env.WEBHOOK_USER || "admin",
+      process.env.WEBHOOK_PASS || "password",
+      authHeader,
+      callbackBody,
+    );
+
+    if (isValid) {
+      const { state, merchantOrderId } = req.body.payload;
+      if (state === "COMPLETED") {
+        // Update Firestore order status here if needed
+        console.log(`Payment success for ${merchantOrderId}`);
+      }
+    }
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("Callback verification failed:", error);
+    res.sendStatus(401);
+  }
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () =>
-  console.log(`🚀 Payment Server running on port ${PORT}`),
+  console.log(`🚀 PhonePe V2 Payment Server running on port ${PORT}`),
 );
