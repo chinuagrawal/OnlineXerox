@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import axios from "axios";
+import {
+  Routes,
+  Route,
+  useNavigate,
+  useLocation,
+  Link,
+  Navigate,
+} from "react-router-dom";
 import { storage, db } from "./firebase.ts";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
@@ -39,71 +47,68 @@ import {
   X,
 } from "lucide-react";
 
-// --- Types ---
-type View = "landing" | "upload" | "checkout" | "status" | "admin";
-
 // --- Components ---
 
-const Header = ({
-  setView,
-  currentView,
-}: {
-  setView: (v: View) => void;
-  currentView: View;
-}) => (
-  <header className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/50">
-    <div className="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto">
-      <div className="flex items-center gap-4">
-        <button className="p-2 hover:bg-slate-100 rounded-full transition-colors lg:hidden">
-          <Menu className="w-5 h-5 text-slate-500" />
-        </button>
-        <span
-          className="text-2xl font-black text-slate-900 tracking-tighter cursor-pointer"
-          onClick={() => setView("landing")}
-        >
-          The Precision Atelier
-        </span>
-      </div>
-      <nav className="hidden lg:flex items-center gap-8">
-        {[
-          { id: "landing", label: "Home" },
-          { id: "upload", label: "Upload" },
-          { id: "status", label: "Orders" },
-          { id: "admin", label: "Admin" },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setView(item.id as View)}
-            className={`text-sm font-semibold transition-all ${
-              currentView === item.id
-                ? "text-primary border-b-2 border-primary pb-1"
-                : "text-slate-500 hover:text-slate-900"
-            }`}
-          >
-            {item.label}
+const Header = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentPath = location.pathname;
+
+  return (
+    <header className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/50">
+      <div className="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto">
+        <div className="flex items-center gap-4">
+          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors lg:hidden">
+            <Menu className="w-5 h-5 text-slate-500" />
           </button>
-        ))}
-      </nav>
-      <div className="w-10 h-10 rounded-full bg-slate-100 border-2 border-white shadow-sm overflow-hidden">
-        <img
-          src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
-          alt="Profile"
-          className="w-full h-full object-cover"
-        />
+          <span
+            className="text-2xl font-black text-slate-900 tracking-tighter cursor-pointer"
+            onClick={() => navigate("/")}
+          >
+            Bindal Computers Xerox
+          </span>
+        </div>
+        <nav className="hidden lg:flex items-center gap-8">
+          {[
+            { id: "/", label: "Home" },
+            { id: "/upload", label: "Upload" },
+            { id: "/status", label: "Orders" },
+            { id: "/admin", label: "Admin" },
+          ].map((item) => (
+            <Link
+              key={item.id}
+              to={item.id}
+              className={`text-sm font-semibold transition-all ${
+                currentPath === item.id
+                  ? "text-primary border-b-2 border-primary pb-1"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="w-10 h-10 rounded-full bg-slate-100 border-2 border-white shadow-sm overflow-hidden">
+          <img
+            src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
+            alt="Profile"
+            className="w-full h-full object-cover"
+          />
+        </div>
       </div>
-    </div>
-  </header>
-);
+    </header>
+  );
+};
 
 const Footer = () => (
   <footer className="bg-slate-50 border-t border-slate-200 py-12 px-6">
     <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
       <div className="text-center md:text-left">
         <span className="text-lg font-bold text-slate-900">
-          The Precision Atelier
+          Bindal Computers Xerox
         </span>
         <p className="text-sm text-slate-500 mt-1">
-          © 2024 The Precision Atelier. Crafted for Clarity.
+          © 2024 Bindal Computers Xerox. Crafted for Clarity.
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-8 text-sm text-slate-500">
@@ -124,219 +129,221 @@ const Footer = () => (
   </footer>
 );
 
-const MobileNav = ({
-  setView,
-  currentView,
-}: {
-  setView: (v: View) => void;
-  currentView: View;
-}) => (
-  <nav className="lg:hidden fixed bottom-0 left-0 w-full bg-white/90 backdrop-blur-lg border-t border-slate-200/50 px-6 py-3 z-50 flex justify-around items-center rounded-t-3xl shadow-2xl">
-    {[
-      { id: "landing", label: "Home", icon: Menu },
-      { id: "upload", label: "Upload", icon: CloudUpload },
-      { id: "status", label: "Orders", icon: ReceiptText },
-      { id: "admin", label: "Admin", icon: Settings },
-    ].map((item) => (
-      <button
-        key={item.id}
-        onClick={() => setView(item.id as View)}
-        className={`flex flex-col items-center gap-1 transition-all ${
-          currentView === item.id ? "text-primary" : "text-slate-400"
-        }`}
-      >
-        <item.icon className="w-6 h-6" />
-        <span className="text-[10px] font-bold uppercase tracking-widest">
-          {item.label}
-        </span>
-      </button>
-    ))}
-  </nav>
-);
+const MobileNav = () => {
+  const location = useLocation();
+  const currentPath = location.pathname;
+
+  return (
+    <nav className="lg:hidden fixed bottom-0 left-0 w-full bg-white/90 backdrop-blur-lg border-t border-slate-200/50 px-6 py-3 z-50 flex justify-around items-center rounded-t-3xl shadow-2xl">
+      {[
+        { id: "/", label: "Home", icon: Menu },
+        { id: "/upload", label: "Upload", icon: CloudUpload },
+        { id: "/status", label: "Orders", icon: ReceiptText },
+        { id: "/admin", label: "Admin", icon: Settings },
+      ].map((item) => (
+        <Link
+          key={item.id}
+          to={item.id}
+          className={`flex flex-col items-center gap-1 transition-all ${
+            currentPath === item.id ? "text-primary" : "text-slate-400"
+          }`}
+        >
+          <item.icon className="w-6 h-6" />
+          <span className="text-[10px] font-bold uppercase tracking-widest">
+            {item.label}
+          </span>
+        </Link>
+      ))}
+    </nav>
+  );
+};
 
 // --- Views ---
 
-const LandingView = ({ onStart }: { onStart: () => void }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: -20 }}
-    className="pt-24 pb-32"
-  >
-    <div className="max-w-7xl mx-auto px-6">
-      <div className="grid lg:grid-cols-2 gap-12 items-center mb-24">
-        <div>
-          <span className="text-xs font-bold uppercase tracking-[0.2em] text-primary mb-4 block">
-            Next-Generation Printing
-          </span>
-          <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 leading-[1.1]">
-            Print Your <span className="text-primary">Documents</span> Online –
-            Fast & Easy
-          </h1>
-          <p className="text-lg text-slate-600 mb-10 max-w-xl leading-relaxed">
-            Experience the tactile precision of high-end print with the fluid
-            efficiency of modern software. Upload, customize, and receive.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <button
-              onClick={onStart}
-              className="signature-gradient text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center gap-2 shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
-            >
-              <CloudUpload className="w-5 h-5" />
-              Upload & Print Now
-            </button>
-            <button className="bg-slate-100 text-slate-900 font-bold px-8 py-4 rounded-xl hover:bg-slate-200 transition-colors">
-              View Pricing
-            </button>
-          </div>
-        </div>
-        <div className="relative group">
-          <div className="bg-white rounded-2xl ambient-shadow p-6 border border-slate-100">
-            <div className="bg-slate-50 rounded-xl overflow-hidden aspect-[4/3] flex flex-col">
-              <div className="p-4 flex items-center justify-between border-b border-slate-200/50">
-                <div className="flex gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                </div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  Atelier Editor v2.4
-                </span>
-              </div>
-              <div className="flex-1 p-8 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 m-4 rounded-lg">
-                <ReceiptText className="w-12 h-12 text-primary/20 mb-4" />
-                <p className="text-sm font-medium text-slate-400">
-                  Drag & drop your files here
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="absolute -top-6 -right-6 w-32 h-32 bg-primary/5 rounded-full blur-3xl -z-10" />
-          <div className="absolute -bottom-6 -left-6 w-24 h-24 bg-primary/10 rounded-full blur-2xl -z-10" />
-        </div>
-      </div>
-
-      <div className="mb-24">
-        <h2 className="text-3xl font-bold text-center mb-16">
-          More than just a printer.
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[
-            {
-              icon: Wifi,
-              title: "Fast WiFi",
-              desc: "Ultra-fast gigabit connection for large assets.",
-            },
-            {
-              icon: Droplets,
-              title: "RO Water",
-              desc: "Complimentary purified water stations.",
-            },
-            {
-              icon: ShieldCheck,
-              title: "CCTV Security",
-              desc: "24/7 surveillance for your documents.",
-            },
-            {
-              icon: Armchair,
-              title: "Comfort Seating",
-              desc: "Ergonomic lounge for your wait.",
-            },
-          ].map((feature, i) => (
-            <div
-              key={i}
-              className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mb-6">
-                <feature.icon className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-bold text-xl mb-2">{feature.title}</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">
-                {feature.desc}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-24">
-        <h2 className="text-4xl font-extrabold text-center mb-16">
-          Transparent Pricing
-        </h2>
-        <div className="grid md:grid-cols-3 gap-8">
-          {[
-            {
-              name: "Standard",
-              price: "0.10",
-              features: [
-                "80gsm White Paper",
-                "High-Res Laser",
-                "Standard Binding",
-              ],
-            },
-            {
-              name: "Professional",
-              price: "0.25",
-              features: [
-                "100gsm Silk Paper",
-                "Full Color Accuracy",
-                "Stapling & Punching",
-              ],
-              popular: true,
-            },
-            {
-              name: "Elite",
-              price: "0.75",
-              features: [
-                "300gsm Cardstock",
-                "Hardcover Binding",
-                "1-Hr Delivery",
-              ],
-            },
-          ].map((tier, i) => (
-            <div
-              key={i}
-              className={`p-8 rounded-2xl border ${tier.popular ? "border-primary bg-white ambient-shadow relative" : "border-slate-200 bg-slate-50"}`}
-            >
-              {tier.popular && (
-                <span className="absolute -top-4 left-1/2 -translate-x-1/2 signature-gradient text-white text-[10px] font-bold px-4 py-1 rounded-full uppercase tracking-tighter">
-                  Most Popular
-                </span>
-              )}
-              <h3
-                className={`text-xs font-bold uppercase tracking-widest mb-4 ${tier.popular ? "text-primary" : "text-slate-400"}`}
-              >
-                {tier.name}
-              </h3>
-              <div className="text-4xl font-black mb-8">
-                ${tier.price}
-                <span className="text-sm font-normal text-slate-500">
-                  /page
-                </span>
-              </div>
-              <ul className="space-y-4 mb-10">
-                {tier.features.map((f, j) => (
-                  <li
-                    key={j}
-                    className="flex items-center gap-3 text-sm font-medium text-slate-600"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-primary" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+const LandingView = () => {
+  const navigate = useNavigate();
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="pt-24 pb-32"
+    >
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="grid lg:grid-cols-2 gap-12 items-center mb-24">
+          <div>
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-primary mb-4 block">
+              Next-Generation Printing
+            </span>
+            <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-slate-900 mb-8 leading-[1.1]">
+              Print Your <span className="text-primary">Documents</span> Online
+              – Fast & Easy
+            </h1>
+            <p className="text-lg text-slate-600 mb-10 max-w-xl leading-relaxed">
+              Experience the tactile precision of high-end print with the fluid
+              efficiency of modern software. Upload, customize, and receive.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
               <button
-                className={`w-full py-4 rounded-xl font-bold transition-all ${tier.popular ? "signature-gradient text-white shadow-lg shadow-primary/20" : "border-2 border-primary text-primary hover:bg-primary/5"}`}
+                onClick={() => navigate("/upload")}
+                className="signature-gradient text-white font-bold px-8 py-4 rounded-xl flex items-center justify-center gap-2 shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
               >
-                Select {tier.name}
+                <CloudUpload className="w-5 h-5" />
+                Upload & Print Now
+              </button>
+              <button className="bg-slate-100 text-slate-900 font-bold px-8 py-4 rounded-xl hover:bg-slate-200 transition-colors">
+                View Pricing
               </button>
             </div>
-          ))}
+          </div>
+          <div className="relative group">
+            <div className="bg-white rounded-2xl ambient-shadow p-6 border border-slate-100">
+              <div className="bg-slate-50 rounded-xl overflow-hidden aspect-[4/3] flex flex-col">
+                <div className="p-4 flex items-center justify-between border-b border-slate-200/50">
+                  <div className="flex gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Bindal Xerox Editor v2.4
+                  </span>
+                </div>
+                <div className="flex-1 p-8 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 m-4 rounded-lg">
+                  <ReceiptText className="w-12 h-12 text-primary/20 mb-4" />
+                  <p className="text-sm font-medium text-slate-400">
+                    Drag & drop your files here
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="absolute -top-6 -right-6 w-32 h-32 bg-primary/5 rounded-full blur-3xl -z-10" />
+            <div className="absolute -bottom-6 -left-6 w-24 h-24 bg-primary/10 rounded-full blur-2xl -z-10" />
+          </div>
+        </div>
+
+        <div className="mb-24">
+          <h2 className="text-3xl font-bold text-center mb-16">
+            Bindal Computers Xerox - More than just a printer.
+          </h2>
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              {
+                icon: Wifi,
+                title: "Fast WiFi",
+                desc: "Ultra-fast gigabit connection for large assets.",
+              },
+              {
+                icon: Droplets,
+                title: "RO Water",
+                desc: "Complimentary purified water stations.",
+              },
+              {
+                icon: ShieldCheck,
+                title: "CCTV Security",
+                desc: "24/7 surveillance for your documents.",
+              },
+              {
+                icon: Armchair,
+                title: "Comfort Seating",
+                desc: "Ergonomic lounge for your wait.",
+              },
+            ].map((feature, i) => (
+              <div
+                key={i}
+                className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mb-6">
+                  <feature.icon className="w-6 h-6 text-primary" />
+                </div>
+                <h3 className="font-bold text-xl mb-2">{feature.title}</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">
+                  {feature.desc}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-24">
+          <h2 className="text-4xl font-extrabold text-center mb-16">
+            Transparent Pricing
+          </h2>
+          <div className="grid md:grid-cols-3 gap-8">
+            {[
+              {
+                name: "Standard",
+                price: "0.10",
+                features: [
+                  "80gsm White Paper",
+                  "High-Res Laser",
+                  "Standard Binding",
+                ],
+              },
+              {
+                name: "Professional",
+                price: "0.25",
+                features: [
+                  "100gsm Silk Paper",
+                  "Full Color Accuracy",
+                  "Stapling & Punching",
+                ],
+                popular: true,
+              },
+              {
+                name: "Elite",
+                price: "0.75",
+                features: [
+                  "300gsm Cardstock",
+                  "Hardcover Binding",
+                  "1-Hr Delivery",
+                ],
+              },
+            ].map((tier, i) => (
+              <div
+                key={i}
+                className={`p-8 rounded-2xl border ${tier.popular ? "border-primary bg-white ambient-shadow relative" : "border-slate-200 bg-slate-50"}`}
+              >
+                {tier.popular && (
+                  <span className="absolute -top-4 left-1/2 -translate-x-1/2 signature-gradient text-white text-[10px] font-bold px-4 py-1 rounded-full uppercase tracking-tighter">
+                    Most Popular
+                  </span>
+                )}
+                <h3
+                  className={`text-xs font-bold uppercase tracking-widest mb-4 ${tier.popular ? "text-primary" : "text-slate-400"}`}
+                >
+                  {tier.name}
+                </h3>
+                <div className="text-4xl font-black mb-8">
+                  ${tier.price}
+                  <span className="text-sm font-normal text-slate-500">
+                    /page
+                  </span>
+                </div>
+                <ul className="space-y-4 mb-10">
+                  {tier.features.map((f, j) => (
+                    <li
+                      key={j}
+                      className="flex items-center gap-3 text-sm font-medium text-slate-600"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-primary" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  className={`w-full py-4 rounded-xl font-bold transition-all ${tier.popular ? "signature-gradient text-white shadow-lg shadow-primary/20" : "border-2 border-primary text-primary hover:bg-primary/5"}`}
+                >
+                  Select {tier.name}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  </motion.div>
-);
+    </motion.div>
+  );
+};
 
 const UploadView = ({ onNext }: { onNext: (data: any) => void }) => {
   const [copies, setCopies] = useState(1);
@@ -939,266 +946,272 @@ const StatusView = ({ orderData }: { orderData: any }) => {
   );
 };
 
-const AdminView = () => (
-  <motion.div
-    initial={{ opacity: 0 }}
-    animate={{ opacity: 1 }}
-    exit={{ opacity: 0 }}
-    className="flex min-h-screen bg-slate-50"
-  >
-    <aside className="w-72 bg-white border-r border-slate-200 hidden lg:flex flex-col fixed h-full">
-      <div className="px-8 py-10">
-        <h1 className="text-2xl font-black text-slate-900 tracking-tighter">
-          The Precision Atelier
-        </h1>
-      </div>
-      <nav className="flex-1 px-4 space-y-2">
-        {[
-          { icon: ReceiptText, label: "Jobs", active: true },
-          { icon: BarChart3, label: "Analytics" },
-          { icon: Settings, label: "Settings" },
-        ].map((item, i) => (
-          <button
-            key={i}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-bold transition-all ${
-              item.active
-                ? "bg-primary text-white shadow-lg shadow-primary/20"
-                : "text-slate-400 hover:bg-slate-50"
-            }`}
-          >
-            <item.icon className="w-5 h-5" />
-            {item.label}
-          </button>
-        ))}
-      </nav>
-      <div className="p-6">
-        <div className="bg-slate-50 p-4 rounded-2xl flex items-center gap-4">
-          <img
-            src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
-            className="w-10 h-10 rounded-full object-cover"
-            alt="Admin"
-          />
-          <div>
-            <p className="text-sm font-bold text-slate-900">Admin User</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Production Lead
-            </p>
-          </div>
-        </div>
-      </div>
-    </aside>
+const AdminView = () => {
+  const [activeTab, setActiveTab] = useState("jobs");
 
-    <main className="flex-1 lg:ml-72 p-8 lg:p-12">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-        <div className="flex items-center gap-4">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tight">
-            Print Queue
-          </h2>
-          <span className="bg-primary/10 text-primary px-4 py-1.5 rounded-full text-[10px] font-bold tracking-[0.2em] uppercase">
-            12 Active
-          </span>
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex min-h-screen bg-slate-50"
+    >
+      <aside className="w-72 bg-white border-r border-slate-200 hidden lg:flex flex-col fixed h-full">
+        <div className="px-8 py-10">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">
+            Bindal Computers Xerox
+          </h1>
         </div>
-        <div className="flex items-center gap-4 w-full md:w-auto">
-          <div className="relative flex-grow md:flex-grow-0">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              className="w-full md:w-64 bg-white border-none rounded-full pl-12 pr-6 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary/20"
-              placeholder="Search files..."
+        <nav className="flex-1 px-4 space-y-2">
+          {[
+            { id: "jobs", icon: ReceiptText, label: "Jobs" },
+            { id: "analytics", icon: BarChart3, label: "Analytics" },
+            { id: "settings", icon: Settings, label: "Settings" },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-bold transition-all ${
+                activeTab === item.id
+                  ? "bg-primary text-white shadow-lg shadow-primary/20"
+                  : "text-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <item.icon className="w-5 h-5" />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="p-6">
+          <div className="bg-slate-50 p-4 rounded-2xl flex items-center gap-4">
+            <img
+              src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
+              className="w-10 h-10 rounded-full object-cover"
+              alt="Admin"
             />
-          </div>
-          <button className="p-3 bg-white rounded-full shadow-sm text-slate-400 hover:text-slate-900 transition-colors">
-            <Bell className="w-5 h-5" />
-          </button>
-        </div>
-      </header>
-
-      <div className="grid lg:grid-cols-3 gap-8 mb-12">
-        <div className="lg:col-span-2">
-          <div className="flex items-end justify-between mb-6">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-2">
-                Workflow Management
+              <p className="text-sm font-bold text-slate-900">Admin User</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Production Lead
               </p>
-              <h3 className="text-4xl font-extrabold tracking-tight">
-                Job Processing
-              </h3>
             </div>
-            <div className="flex gap-2">
-              {["All Jobs", "Pending", "Printed"].map((tab, i) => (
-                <button
-                  key={i}
-                  className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${
-                    i === 0
-                      ? "bg-primary text-white shadow-lg shadow-primary/20"
-                      : "bg-white text-slate-400 hover:bg-slate-100"
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
+          </div>
+        </div>
+      </aside>
+
+      <main className="flex-1 lg:ml-72 p-8 lg:p-12">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+          <div className="flex items-center gap-4">
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight">
+              Print Queue
+            </h2>
+            <span className="bg-primary/10 text-primary px-4 py-1.5 rounded-full text-[10px] font-bold tracking-[0.2em] uppercase">
+              12 Active
+            </span>
+          </div>
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            <div className="relative flex-grow md:flex-grow-0">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                className="w-full md:w-64 bg-white border-none rounded-full pl-12 pr-6 py-3 text-sm shadow-sm focus:ring-2 focus:ring-primary/20"
+                placeholder="Search files..."
+              />
+            </div>
+            <button className="p-3 bg-white rounded-full shadow-sm text-slate-400 hover:text-slate-900 transition-colors">
+              <Bell className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+
+        <div className="grid lg:grid-cols-3 gap-8 mb-12">
+          <div className="lg:col-span-2">
+            <div className="flex items-end justify-between mb-6">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-2">
+                  Workflow Management
+                </p>
+                <h3 className="text-4xl font-extrabold tracking-tight">
+                  Job Processing
+                </h3>
+              </div>
+              <div className="flex gap-2">
+                {["All Jobs", "Pending", "Printed"].map((tab, i) => (
+                  <button
+                    key={i}
+                    className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${
+                      i === 0
+                        ? "bg-primary text-white shadow-lg shadow-primary/20"
+                        : "bg-white text-slate-400 hover:bg-slate-100"
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="bg-slate-50/50 border-b border-slate-100">
+                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      ID
+                    </th>
+                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      User
+                    </th>
+                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      File Name
+                    </th>
+                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                      Status
+                    </th>
+                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-right">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {[
+                    {
+                      id: "#PA-7821",
+                      user: "Eleanor Lewis",
+                      file: "brand_identity_v2.pdf",
+                      status: "Pending",
+                      color: "amber",
+                    },
+                    {
+                      id: "#PA-7819",
+                      user: "Marcus Kane",
+                      file: "portrait_gallery_01.jpg",
+                      status: "Printed",
+                      color: "emerald",
+                    },
+                    {
+                      id: "#PA-7815",
+                      user: "Anna Smith",
+                      file: "quarterly_report_final.pdf",
+                      status: "Failed",
+                      color: "red",
+                    },
+                  ].map((job, i) => (
+                    <tr
+                      key={i}
+                      className="hover:bg-slate-50/50 transition-colors group"
+                    >
+                      <td className="px-8 py-6 font-mono text-xs font-bold text-slate-400">
+                        {job.id}
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500">
+                            {job.user
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
+                          </div>
+                          <span className="text-sm font-bold text-slate-900">
+                            {job.user}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-2">
+                          <ReceiptText className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium text-slate-600">
+                            {job.file}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <span
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter ${
+                            job.color === "amber"
+                              ? "bg-amber-50 text-amber-600"
+                              : job.color === "emerald"
+                                ? "bg-emerald-50 text-emerald-600"
+                                : "bg-red-50 text-red-600"
+                          }`}
+                        >
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="px-8 py-6 text-right space-x-2">
+                        <button className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg hover:shadow-lg active:scale-95 transition-all">
+                          Print
+                        </button>
+                        <button className="p-2 text-slate-300 hover:text-slate-900 transition-colors">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-100">
-                  <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    ID
-                  </th>
-                  <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    User
-                  </th>
-                  <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    File Name
-                  </th>
-                  <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                    Status
-                  </th>
-                  <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-right">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
+          <div className="space-y-6">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">
+                  Efficiency
+                </p>
+                <p className="text-4xl font-black text-primary">98.4%</p>
+              </div>
+              <div className="flex items-end gap-1 h-12">
+                {[40, 70, 50, 90, 60, 80].map((h, i) => (
+                  <div
+                    key={i}
+                    className="w-2 bg-primary/20 rounded-full"
+                    style={{ height: `${h}%` }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-slate-900 p-8 rounded-2xl text-white shadow-2xl shadow-slate-900/20">
+              <h4 className="text-lg font-bold mb-6">System Health</h4>
+              <div className="space-y-6">
                 {[
                   {
-                    id: "#PA-7821",
-                    user: "Eleanor Lewis",
-                    file: "brand_identity_v2.pdf",
-                    status: "Pending",
-                    color: "amber",
+                    label: "Press Temperature",
+                    value: "184°C",
+                    status: "Optimal",
                   },
-                  {
-                    id: "#PA-7819",
-                    user: "Marcus Kane",
-                    file: "portrait_gallery_01.jpg",
-                    status: "Printed",
-                    color: "emerald",
-                  },
-                  {
-                    id: "#PA-7815",
-                    user: "Anna Smith",
-                    file: "quarterly_report_final.pdf",
-                    status: "Failed",
-                    color: "red",
-                  },
-                ].map((job, i) => (
-                  <tr
-                    key={i}
-                    className="hover:bg-slate-50/50 transition-colors group"
-                  >
-                    <td className="px-8 py-6 font-mono text-xs font-bold text-slate-400">
-                      {job.id}
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500">
-                          {job.user
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </div>
-                        <span className="text-sm font-bold text-slate-900">
-                          {job.user}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-2">
-                        <ReceiptText className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-slate-600">
-                          {job.file}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <span
-                        className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter ${
-                          job.color === "amber"
-                            ? "bg-amber-50 text-amber-600"
-                            : job.color === "emerald"
-                              ? "bg-emerald-50 text-emerald-600"
-                              : "bg-red-50 text-red-600"
-                        }`}
-                      >
-                        {job.status}
-                      </span>
-                    </td>
-                    <td className="px-8 py-6 text-right space-x-2">
-                      <button className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg hover:shadow-lg active:scale-95 transition-all">
-                        Print
-                      </button>
-                      <button className="p-2 text-slate-300 hover:text-slate-900 transition-colors">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
+                  { label: "Ink Levels (CMYK)", value: "82%", status: "Good" },
+                  { label: "Queue Load", value: "High", status: "Managing" },
+                ].map((stat, i) => (
+                  <div key={i}>
+                    <div className="flex justify-between text-xs font-bold uppercase tracking-widest mb-2">
+                      <span className="text-slate-500">{stat.label}</span>
+                      <span className="text-emerald-400">{stat.status}</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-primary w-3/4" />
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">
-                Efficiency
-              </p>
-              <p className="text-4xl font-black text-primary">98.4%</p>
-            </div>
-            <div className="flex items-end gap-1 h-12">
-              {[40, 70, 50, 90, 60, 80].map((h, i) => (
-                <div
-                  key={i}
-                  className="w-2 bg-primary/20 rounded-full"
-                  style={{ height: `${h}%` }}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-slate-900 p-8 rounded-2xl text-white shadow-2xl shadow-slate-900/20">
-            <h4 className="text-lg font-bold mb-6">System Health</h4>
-            <div className="space-y-6">
-              {[
-                {
-                  label: "Press Temperature",
-                  value: "184°C",
-                  status: "Optimal",
-                },
-                { label: "Ink Levels (CMYK)", value: "82%", status: "Good" },
-                { label: "Queue Load", value: "High", status: "Managing" },
-              ].map((stat, i) => (
-                <div key={i}>
-                  <div className="flex justify-between text-xs font-bold uppercase tracking-widest mb-2">
-                    <span className="text-slate-500">{stat.label}</span>
-                    <span className="text-emerald-400">{stat.status}</span>
-                  </div>
-                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-primary w-3/4" />
-                  </div>
-                </div>
-              ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </main>
-  </motion.div>
-);
+      </main>
+    </motion.div>
+  );
+};
 
 // --- Main App ---
 
 export default function App() {
-  const [view, setView] = useState<View>("landing");
+  const navigate = useNavigate();
+  const location = useLocation();
   const [orderData, setOrderData] = useState<any>(null);
 
-  // Scroll to top on view change
+  // Scroll to top on route change
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [view]);
+  }, [location.pathname]);
 
   // Handle return from PhonePe
   useEffect(() => {
@@ -1208,7 +1221,6 @@ export default function App() {
 
     if (txnId && storedOrder) {
       const order = JSON.parse(storedOrder);
-      // Add to Firestore if it hasn't been added yet
       const saveOrder = async () => {
         try {
           const ordersRef = collection(db, "orders");
@@ -1220,7 +1232,7 @@ export default function App() {
             paidAt: serverTimestamp(),
           });
           setOrderData({ ...order, orderId: txnId });
-          setView("status");
+          navigate("/status", { replace: true });
           localStorage.removeItem("pendingOrder");
         } catch (err) {
           console.error("Firestore Error:", err);
@@ -1228,78 +1240,57 @@ export default function App() {
       };
       saveOrder();
     }
-  }, []);
+  }, [navigate]);
 
   const handleUploadComplete = (data: any) => {
     setOrderData(data);
     localStorage.setItem("pendingOrder", JSON.stringify(data));
-    setView("checkout");
+    navigate("/checkout");
   };
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header setView={setView} currentView={view} />
+      {location.pathname !== "/admin" && <Header />}
 
       <main className="flex-grow">
         <AnimatePresence mode="wait">
-          {view === "landing" && (
-            <motion.div
-              key="landing"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <LandingView onStart={() => setView("upload")} />
-            </motion.div>
-          )}
-          {view === "upload" && (
-            <motion.div
-              key="upload"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <UploadView onNext={handleUploadComplete} />
-            </motion.div>
-          )}
-          {view === "checkout" && (
-            <motion.div
-              key="checkout"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <CheckoutView
-                orderData={orderData}
-                onNext={() => setView("status")}
-              />
-            </motion.div>
-          )}
-          {view === "status" && (
-            <motion.div
-              key="status"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <StatusView orderData={orderData} />
-            </motion.div>
-          )}
-          {view === "admin" && (
-            <motion.div
-              key="admin"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <AdminView />
-            </motion.div>
-          )}
+          <Routes location={location}>
+            <Route path="/" element={<LandingView />} />
+            <Route
+              path="/upload"
+              element={<UploadView onNext={handleUploadComplete} />}
+            />
+            <Route
+              path="/checkout"
+              element={
+                orderData ? (
+                  <CheckoutView
+                    orderData={orderData}
+                    onNext={() => navigate("/status")}
+                  />
+                ) : (
+                  <Navigate to="/upload" replace />
+                )
+              }
+            />
+            <Route
+              path="/status"
+              element={
+                orderData ? (
+                  <StatusView orderData={orderData} />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route path="/admin" element={<AdminView />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </AnimatePresence>
       </main>
 
-      {view !== "admin" && <Footer />}
-      {view !== "admin" && <MobileNav setView={setView} currentView={view} />}
+      {location.pathname !== "/admin" && <Footer />}
+      {location.pathname !== "/admin" && <MobileNav />}
     </div>
   );
 }
