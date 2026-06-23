@@ -14,11 +14,9 @@ import {
   collection,
   addDoc,
   serverTimestamp,
-  getDocs,
   query,
   orderBy,
   doc,
-  getDoc,
   onSnapshot,
   updateDoc,
 } from "firebase/firestore";
@@ -38,9 +36,6 @@ import {
   ShieldCheck,
   Lock,
   Truck,
-  CreditCard,
-  Wallet,
-  Building2,
   ChevronRight,
   Printer,
   Package,
@@ -360,7 +355,27 @@ const UploadView = ({ onNext }: { onNext: (data: any) => void }) => {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [printers, setPrinters] = useState<string[]>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch available printers from Firestore
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, "system", "printers"),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const availablePrinters = data?.available || [];
+          setPrinters(availablePrinters);
+          if (availablePrinters.length > 0 && !selectedPrinter) {
+            setSelectedPrinter(availablePrinters[0]);
+          }
+        }
+      },
+    );
+    return unsubscribe;
+  }, [selectedPrinter]);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -390,6 +405,7 @@ const UploadView = ({ onNext }: { onNext: (data: any) => void }) => {
           copies,
           colorMode,
           paper,
+          printer: selectedPrinter,
           status: "queued",
           paymentStatus: "paid",
           createdAt: serverTimestamp(),
@@ -473,6 +489,23 @@ const UploadView = ({ onNext }: { onNext: (data: any) => void }) => {
               <h3 className="text-lg font-bold">Print Configuration</h3>
             </div>
             <div className="space-y-8">
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Select Printer
+                </label>
+                <select
+                  value={selectedPrinter}
+                  onChange={(e) => setSelectedPrinter(e.target.value)}
+                  className="w-full p-4 bg-slate-50 border-none rounded-xl font-bold text-sm focus:ring-2 focus:ring-primary/20"
+                >
+                  {printers.map((printer, index) => (
+                    <option key={index} value={printer}>
+                      {printer}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
                 <div>
                   <p className="font-bold text-sm">Color Mode</p>
@@ -628,184 +661,6 @@ const UploadView = ({ onNext }: { onNext: (data: any) => void }) => {
           </button>
         </div>
       </aside>
-    </motion.div>
-  );
-};
-
-const CheckoutView = ({
-  orderData,
-  onNext,
-}: {
-  orderData: any;
-  onNext: () => void;
-}) => {
-  const [paying, setPaying] = useState(false);
-
-  const handlePayment = async () => {
-    if (!orderData) return;
-    setPaying(true);
-
-    try {
-      // Call PhonePe V2 Backend API
-      const response = await axios.post(`${BACKEND_URL}/api/pay`, {
-        amount: orderData.amount,
-        merchantUserId: "USER-" + uuidv4().slice(0, 8),
-        orderData: orderData,
-      });
-
-      if (response.data.success && response.data.redirectUrl) {
-        // Redirect to PhonePe Payment Page
-        window.location.href = response.data.redirectUrl;
-      } else {
-        alert("Payment initiation failed. Please try again.");
-        setPaying(false);
-      }
-    } catch (error) {
-      console.error("Payment Error:", error);
-      alert("Something went wrong. Please check your connection.");
-      setPaying(false);
-    }
-  };
-
-  if (!orderData)
-    return (
-      <div className="pt-32 text-center">
-        <h2 className="text-2xl font-bold">No order data found</h2>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-4 text-primary font-bold underline"
-        >
-          Go Back
-        </button>
-      </div>
-    );
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="pt-24 pb-32 px-6 max-w-6xl mx-auto grid lg:grid-cols-12 gap-12"
-    >
-      <div className="lg:col-span-7 space-y-8">
-        <section>
-          <p className="text-primary font-bold uppercase tracking-widest text-[10px] mb-2">
-            Secure Checkout
-          </p>
-          <h2 className="text-4xl font-extrabold tracking-tight text-slate-900 mb-6">
-            Complete your order
-          </h2>
-        </section>
-
-        <section className="space-y-4">
-          <h3 className="text-xl font-bold">Select Payment Method</h3>
-          <div className="space-y-3">
-            {[
-              {
-                id: "phonepe",
-                title: "PhonePe",
-                desc: "Pay via PhonePe UPI or Wallet",
-                icon: Wallet,
-                active: true,
-              },
-              {
-                id: "upi",
-                title: "Other UPI",
-                desc: "Google Pay, Paytm, etc.",
-                icon: CreditCard,
-              },
-              {
-                id: "net",
-                title: "Net Banking",
-                desc: "All major Indian banks supported",
-                icon: Building2,
-              },
-            ].map((method) => (
-              <label
-                key={method.id}
-                className="group flex items-center justify-between p-5 bg-white rounded-2xl cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all ambient-shadow"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center">
-                    <method.icon className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-slate-900">{method.title}</p>
-                    <p className="text-xs text-slate-400 font-medium">
-                      {method.desc}
-                    </p>
-                  </div>
-                </div>
-                <input
-                  type="radio"
-                  name="payment"
-                  defaultChecked={method.active}
-                  className="w-5 h-5 text-primary focus:ring-primary"
-                />
-              </label>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div className="lg:col-span-5">
-        <aside className="sticky top-32 space-y-6">
-          <div className="bg-white p-8 rounded-2xl ambient-shadow border border-slate-100">
-            <h3 className="text-xl font-bold mb-8">Order Summary</h3>
-            <div className="flex items-start gap-4 mb-8">
-              <div className="w-16 h-20 bg-slate-50 rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden">
-                <ReceiptText className="w-8 h-8 text-slate-300" />
-              </div>
-              <div className="flex-grow">
-                <p className="font-bold text-slate-900 leading-tight">
-                  {orderData.fileName}
-                </p>
-                <p className="text-sm text-slate-500 mt-1">
-                  {orderData.paper.toUpperCase()} •{" "}
-                  {orderData.colorMode === "color" ? "Color" : "B&W"}
-                </p>
-                <div className="flex justify-between items-center mt-4">
-                  <span className="text-sm font-bold text-slate-400">
-                    Qty: {orderData.copies} Units
-                  </span>
-                  <span className="font-bold text-slate-900">
-                    ₹{orderData.amount}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4 pt-8 border-t border-slate-100">
-              <div className="flex justify-between text-sm font-medium text-slate-500">
-                <span>Subtotal</span>
-                <span>₹{orderData.amount}</span>
-              </div>
-              <div className="flex justify-between text-sm font-medium text-slate-500">
-                <span>Shipping & Handling</span>
-                <span className="text-emerald-600">Free</span>
-              </div>
-              <div className="flex justify-between items-center pt-6 mt-2">
-                <span className="font-bold text-lg">Total Amount</span>
-                <span className="text-3xl font-black text-primary">
-                  ₹{orderData.amount}
-                </span>
-              </div>
-            </div>
-
-            <button
-              onClick={handlePayment}
-              disabled={paying}
-              className={`w-full mt-10 signature-gradient text-white font-bold py-5 rounded-2xl shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 ${paying ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              {paying ? "Processing..." : `Pay ₹${orderData.amount}`}
-              <ArrowRight className="w-5 h-5" />
-            </button>
-            <p className="text-center text-[10px] text-slate-400 mt-6 uppercase tracking-[0.2em] font-bold">
-              Encrypted & Secure Payment
-            </p>
-          </div>
-        </aside>
-      </div>
     </motion.div>
   );
 };
