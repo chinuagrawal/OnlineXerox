@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import axios from "axios";
 import {
   Routes,
   Route,
@@ -11,10 +10,19 @@ import {
 } from "react-router-dom";
 import { storage, db } from "./firebase.ts";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  getDocs,
+  query,
+  orderBy,
+  doc,
+  getDoc,
+  onSnapshot,
+  updateDoc,
+} from "firebase/firestore";
 import { v4 as uuidv4 } from "uuid";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 import {
   Menu,
@@ -382,13 +390,21 @@ const UploadView = ({ onNext }: { onNext: (data: any) => void }) => {
           copies,
           colorMode,
           paper,
-          status: "pending",
-          paymentStatus: "pending",
+          status: "queued",
+          paymentStatus: "paid",
           createdAt: serverTimestamp(),
           amount: (2.4 * copies + 1.2 * copies + 0.5).toFixed(2),
         };
 
-        onNext(orderData);
+        // Save order directly to Firestore
+        try {
+          const ordersRef = collection(db, "orders");
+          await addDoc(ordersRef, orderData);
+          onNext(orderData);
+        } catch (err) {
+          console.error("Firestore Error:", err);
+        }
+
         setUploading(false);
       },
     );
@@ -794,8 +810,103 @@ const CheckoutView = ({
   );
 };
 
-const StatusView = ({ orderData }: { orderData: any }) => {
-  if (!orderData) return null;
+const StatusView = ({ orderId }: { orderId?: string }) => {
+  const [order, setOrder] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!orderId) {
+      setLoading(false);
+      return;
+    }
+
+    // Listen for real-time updates from Firestore
+    const q = query(collection(db, "orders"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const foundOrder = snapshot.docs.find(
+        (doc) => doc.data().orderId === orderId,
+      );
+      if (foundOrder) {
+        setOrder(foundOrder.data());
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [orderId]);
+
+  const getStepDetails = (status: string) => {
+    const steps = [
+      {
+        title: "Order Received",
+        time: "Just Now",
+        desc: "System verified files and technical specifications.",
+        done: true,
+      },
+      {
+        title: "Queued for Printing",
+        time: "Pending",
+        desc: "Your document is in the local print queue.",
+        active: status === "queued",
+        done: ["queued", "printing", "printed"].includes(status),
+      },
+      {
+        title: "Printing",
+        time: "Waiting...",
+        desc: "Local agent will start printing soon.",
+        active: status === "printing",
+        done: ["printing", "printed"].includes(status),
+        pending: !["printing", "printed"].includes(status),
+      },
+      {
+        title: "Quality Control",
+        time: "Waiting...",
+        desc: "Final inspection and pickup ready.",
+        active: status === "printed",
+        done: status === "printed",
+        pending: status !== "printed",
+      },
+    ];
+
+    // Update times based on status
+    if (status === "printing") {
+      steps[1].time = "Now";
+    } else if (status === "printed") {
+      steps[1].time = "Done";
+      steps[2].time = "Just Now";
+    }
+
+    return steps;
+  };
+
+  if (loading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="pt-28 pb-32 px-6 max-w-7xl mx-auto text-center"
+      >
+        <p className="text-lg text-slate-500">Loading order details...</p>
+      </motion.div>
+    );
+  }
+
+  if (!order) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="pt-28 pb-32 px-6 max-w-7xl mx-auto text-center"
+      >
+        <h2 className="text-2xl font-bold mb-4">Order not found</h2>
+        <Link to="/upload" className="text-primary font-bold underline">
+          Upload a new document
+        </Link>
+      </motion.div>
+    );
+  }
+
+  const steps = getStepDetails(order.status);
 
   return (
     <motion.div
@@ -808,7 +919,7 @@ const StatusView = ({ orderData }: { orderData: any }) => {
         <div className="flex items-center gap-2 text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">
           <span>Orders</span>
           <ChevronRight className="w-3 h-3" />
-          <span className="text-slate-900">#{orderData.orderId}</span>
+          <span className="text-slate-900">#{order.orderId}</span>
         </div>
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
           <div>
@@ -818,9 +929,8 @@ const StatusView = ({ orderData }: { orderData: any }) => {
             <p className="text-slate-400 font-medium">
               Order ID:{" "}
               <span className="font-mono font-bold text-slate-900">
-                #{orderData.orderId}
-              </span>{" "}
-              • Placed Just Now
+                #{order.orderId}
+              </span>
             </p>
           </div>
           <button className="flex items-center gap-2 px-8 py-4 signature-gradient text-white rounded-xl font-bold shadow-xl shadow-primary/20 active:scale-95 transition-all">
@@ -834,35 +944,20 @@ const StatusView = ({ orderData }: { orderData: any }) => {
         <div className="lg:col-span-8">
           <div className="bg-white rounded-2xl p-10 shadow-sm border border-slate-100 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-100">
-              <div className="h-full bg-primary w-[25%]" />
+              <div
+                className={`h-full bg-primary ${
+                  order.status === "queued"
+                    ? "w-[25%]"
+                    : order.status === "printing"
+                      ? "w-[50%]"
+                      : order.status === "printed"
+                        ? "w-full"
+                        : "w-[25%]"
+                }`}
+              />
             </div>
             <div className="space-y-16 mt-4">
-              {[
-                {
-                  title: "Order Received",
-                  time: "Just Now",
-                  desc: "System verified files and technical specifications.",
-                  done: true,
-                },
-                {
-                  title: "Queued for Printing",
-                  time: "Pending",
-                  desc: "Your document is in the local print queue.",
-                  active: true,
-                },
-                {
-                  title: "Printing",
-                  time: "Waiting...",
-                  desc: "Local agent will start printing soon.",
-                  pending: true,
-                },
-                {
-                  title: "Quality Control",
-                  time: "Waiting...",
-                  desc: "Final inspection and pickup ready.",
-                  pending: true,
-                },
-              ].map((step, i) => (
+              {steps.map((step, i) => (
                 <div key={i} className="flex gap-8 relative">
                   <div className="flex flex-col items-center">
                     <div
@@ -884,7 +979,7 @@ const StatusView = ({ orderData }: { orderData: any }) => {
                     </div>
                     {i < 3 && (
                       <div
-                        className={`w-0.5 h-20 absolute top-12 left-6 -z-0 ${step.done ? "bg-primary" : "bg-slate-100"}`}
+                        className={`w-0.5 h-20 absolute top-12 left-6 -z-0 ${steps[i + 1]?.done ? "bg-primary" : "bg-slate-100"}`}
                       />
                     )}
                   </div>
@@ -914,12 +1009,18 @@ const StatusView = ({ orderData }: { orderData: any }) => {
             <h4 className="text-lg font-bold">Specifications</h4>
             <div className="space-y-4">
               {[
-                { label: "File Name", value: orderData.fileName },
-                { label: "Paper Size", value: orderData.paper.toUpperCase() },
-                { label: "Quantity", value: orderData.copies },
+                { label: "File Name", value: order.fileName },
+                { label: "Paper Size", value: order.paper.toUpperCase() },
+                { label: "Quantity", value: order.copies },
                 {
                   label: "Color Mode",
-                  value: orderData.colorMode === "color" ? "Full Color" : "B&W",
+                  value: order.colorMode === "color" ? "Full Color" : "B&W",
+                },
+                {
+                  label: "Status",
+                  value:
+                    order.status.charAt(0).toUpperCase() +
+                    order.status.slice(1),
                 },
               ].map((spec, i) => (
                 <div
@@ -934,9 +1035,9 @@ const StatusView = ({ orderData }: { orderData: any }) => {
               ))}
             </div>
             <div className="pt-6 border-t border-slate-100 flex justify-between items-center">
-              <span className="font-bold text-slate-900">Paid Amount</span>
+              <span className="font-bold text-slate-900">Amount</span>
               <span className="text-3xl font-black text-primary">
-                ₹{orderData.amount}
+                ₹{order.amount}
               </span>
             </div>
           </div>
@@ -948,6 +1049,58 @@ const StatusView = ({ orderData }: { orderData: any }) => {
 
 const AdminView = () => {
   const [activeTab, setActiveTab] = useState("jobs");
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("All Jobs");
+
+  useEffect(() => {
+    // Listen for real-time updates from Firestore
+    const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ordersList = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setOrders(ordersList);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
+    try {
+      const orderDoc = doc(db, "orders", orderId);
+      await updateDoc(orderDoc, { status: newStatus });
+    } catch (err) {
+      console.error("Error updating order status:", err);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "queued":
+        return "amber";
+      case "printing":
+        return "blue";
+      case "printed":
+        return "emerald";
+      case "failed":
+        return "red";
+      default:
+        return "slate";
+    }
+  };
+
+  const filteredOrders =
+    filter === "All Jobs"
+      ? orders
+      : orders.filter((order) => {
+          if (filter === "Pending")
+            return ["queued", "printing"].includes(order.status);
+          if (filter === "Printed") return order.status === "printed";
+          return true;
+        });
 
   return (
     <motion.div
@@ -1006,7 +1159,7 @@ const AdminView = () => {
               Print Queue
             </h2>
             <span className="bg-primary/10 text-primary px-4 py-1.5 rounded-full text-[10px] font-bold tracking-[0.2em] uppercase">
-              12 Active
+              {orders.length} Orders
             </span>
           </div>
           <div className="flex items-center gap-4 w-full md:w-auto">
@@ -1038,8 +1191,9 @@ const AdminView = () => {
                 {["All Jobs", "Pending", "Printed"].map((tab, i) => (
                   <button
                     key={i}
+                    onClick={() => setFilter(tab)}
                     className={`px-5 py-2 rounded-full text-xs font-bold transition-all ${
-                      i === 0
+                      filter === tab
                         ? "bg-primary text-white shadow-lg shadow-primary/20"
                         : "bg-white text-slate-400 hover:bg-slate-100"
                     }`}
@@ -1051,103 +1205,109 @@ const AdminView = () => {
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-50/50 border-b border-slate-100">
-                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      ID
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      User
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      File Name
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                      Status
-                    </th>
-                    <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-right">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {[
-                    {
-                      id: "#PA-7821",
-                      user: "Eleanor Lewis",
-                      file: "brand_identity_v2.pdf",
-                      status: "Pending",
-                      color: "amber",
-                    },
-                    {
-                      id: "#PA-7819",
-                      user: "Marcus Kane",
-                      file: "portrait_gallery_01.jpg",
-                      status: "Printed",
-                      color: "emerald",
-                    },
-                    {
-                      id: "#PA-7815",
-                      user: "Anna Smith",
-                      file: "quarterly_report_final.pdf",
-                      status: "Failed",
-                      color: "red",
-                    },
-                  ].map((job, i) => (
-                    <tr
-                      key={i}
-                      className="hover:bg-slate-50/50 transition-colors group"
-                    >
-                      <td className="px-8 py-6 font-mono text-xs font-bold text-slate-400">
-                        {job.id}
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500">
-                            {job.user
-                              .split(" ")
-                              .map((n) => n[0])
-                              .join("")}
-                          </div>
-                          <span className="text-sm font-bold text-slate-900">
-                            {job.user}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="flex items-center gap-2">
-                          <ReceiptText className="w-4 h-4 text-primary" />
-                          <span className="text-sm font-medium text-slate-600">
-                            {job.file}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter ${
-                            job.color === "amber"
-                              ? "bg-amber-50 text-amber-600"
-                              : job.color === "emerald"
-                                ? "bg-emerald-50 text-emerald-600"
-                                : "bg-red-50 text-red-600"
-                          }`}
-                        >
-                          {job.status}
-                        </span>
-                      </td>
-                      <td className="px-8 py-6 text-right space-x-2">
-                        <button className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg hover:shadow-lg active:scale-95 transition-all">
-                          Print
-                        </button>
-                        <button className="p-2 text-slate-300 hover:text-slate-900 transition-colors">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </td>
+              {loading ? (
+                <div className="p-12 text-center">
+                  <p className="text-lg text-slate-500">Loading orders...</p>
+                </div>
+              ) : (
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        ID
+                      </th>
+                      <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        File Name
+                      </th>
+                      <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        Details
+                      </th>
+                      <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        Status
+                      </th>
+                      <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-widest text-slate-400 text-right">
+                        Action
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {filteredOrders.map((order, i) => (
+                      <tr
+                        key={order.id}
+                        className="hover:bg-slate-50/50 transition-colors group"
+                      >
+                        <td className="px-8 py-6 font-mono text-xs font-bold text-slate-400">
+                          #{order.orderId}
+                        </td>
+                        <td className="px-8 py-6">
+                          <div className="flex items-center gap-2">
+                            <ReceiptText className="w-4 h-4 text-primary" />
+                            <span className="text-sm font-medium text-slate-600">
+                              {order.fileName}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-8 py-6">
+                          <div className="text-xs text-slate-500">
+                            {order.copies}x {order.paper.toUpperCase()} •{" "}
+                            {order.colorMode === "color" ? "Color" : "B&W"}
+                          </div>
+                        </td>
+                        <td className="px-8 py-6">
+                          <span
+                            className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter ${
+                              getStatusColor(order.status) === "amber"
+                                ? "bg-amber-50 text-amber-600"
+                                : getStatusColor(order.status) === "emerald"
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : getStatusColor(order.status) === "blue"
+                                    ? "bg-blue-50 text-blue-600"
+                                    : "bg-red-50 text-red-600"
+                            }`}
+                          >
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="px-8 py-6 text-right space-x-2">
+                          {order.status === "queued" && (
+                            <button
+                              onClick={() =>
+                                handleUpdateStatus(order.id, "printing")
+                              }
+                              className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg hover:shadow-lg active:scale-95 transition-all"
+                            >
+                              Start Print
+                            </button>
+                          )}
+                          {order.status === "printing" && (
+                            <button
+                              onClick={() =>
+                                handleUpdateStatus(order.id, "printed")
+                              }
+                              className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-bold rounded-lg hover:shadow-lg active:scale-95 transition-all"
+                            >
+                              Mark Printed
+                            </button>
+                          )}
+                          <button className="p-2 text-slate-300 hover:text-slate-900 transition-colors">
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredOrders.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-8 py-12 text-center text-slate-500"
+                        >
+                          No orders found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
 
@@ -1155,9 +1315,11 @@ const AdminView = () => {
             <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
               <div>
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">
-                  Efficiency
+                  Total Orders
                 </p>
-                <p className="text-4xl font-black text-primary">98.4%</p>
+                <p className="text-4xl font-black text-primary">
+                  {orders.length}
+                </p>
               </div>
               <div className="flex items-end gap-1 h-12">
                 {[40, 70, 50, 90, 60, 80].map((h, i) => (
@@ -1171,24 +1333,37 @@ const AdminView = () => {
             </div>
 
             <div className="bg-slate-900 p-8 rounded-2xl text-white shadow-2xl shadow-slate-900/20">
-              <h4 className="text-lg font-bold mb-6">System Health</h4>
+              <h4 className="text-lg font-bold mb-6">Order Status</h4>
               <div className="space-y-6">
                 {[
                   {
-                    label: "Press Temperature",
-                    value: "184°C",
-                    status: "Optimal",
+                    label: "Queued",
+                    value: orders.filter((o) => o.status === "queued").length,
+                    color: "amber",
                   },
-                  { label: "Ink Levels (CMYK)", value: "82%", status: "Good" },
-                  { label: "Queue Load", value: "High", status: "Managing" },
+                  {
+                    label: "Printing",
+                    value: orders.filter((o) => o.status === "printing").length,
+                    color: "blue",
+                  },
+                  {
+                    label: "Printed",
+                    value: orders.filter((o) => o.status === "printed").length,
+                    color: "emerald",
+                  },
                 ].map((stat, i) => (
                   <div key={i}>
                     <div className="flex justify-between text-xs font-bold uppercase tracking-widest mb-2">
                       <span className="text-slate-500">{stat.label}</span>
-                      <span className="text-emerald-400">{stat.status}</span>
+                      <span>{stat.value}</span>
                     </div>
                     <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary w-3/4" />
+                      <div
+                        className={`h-full bg-${stat.color}-500`}
+                        style={{
+                          width: `${orders.length > 0 ? (stat.value / orders.length) * 100 : 0}%`,
+                        }}
+                      />
                     </div>
                   </div>
                 ))}
@@ -1206,47 +1381,20 @@ const AdminView = () => {
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [orderData, setOrderData] = useState<any>(null);
 
   // Scroll to top on route change
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
-  // Handle return from PhonePe
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const txnId = urlParams.get("txnId");
-    const storedOrder = localStorage.getItem("pendingOrder");
-
-    if (txnId && storedOrder) {
-      const order = JSON.parse(storedOrder);
-      const saveOrder = async () => {
-        try {
-          const ordersRef = collection(db, "orders");
-          await addDoc(ordersRef, {
-            ...order,
-            txnId,
-            paymentStatus: "paid",
-            status: "queued",
-            paidAt: serverTimestamp(),
-          });
-          setOrderData({ ...order, orderId: txnId });
-          navigate("/status", { replace: true });
-          localStorage.removeItem("pendingOrder");
-        } catch (err) {
-          console.error("Firestore Error:", err);
-        }
-      };
-      saveOrder();
-    }
-  }, [navigate]);
-
   const handleUploadComplete = (data: any) => {
-    setOrderData(data);
-    localStorage.setItem("pendingOrder", JSON.stringify(data));
-    navigate("/checkout");
+    // Order is already saved to Firestore in UploadView
+    navigate(`/status?orderId=${data.orderId}`);
   };
+
+  // Get orderId from URL query params for StatusView
+  const urlParams = new URLSearchParams(location.search);
+  const orderId = urlParams.get("orderId");
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -1260,29 +1408,7 @@ export default function App() {
               path="/upload"
               element={<UploadView onNext={handleUploadComplete} />}
             />
-            <Route
-              path="/checkout"
-              element={
-                orderData ? (
-                  <CheckoutView
-                    orderData={orderData}
-                    onNext={() => navigate("/status")}
-                  />
-                ) : (
-                  <Navigate to="/upload" replace />
-                )
-              }
-            />
-            <Route
-              path="/status"
-              element={
-                orderData ? (
-                  <StatusView orderData={orderData} />
-                ) : (
-                  <Navigate to="/" replace />
-                )
-              }
-            />
+            <Route path="/status" element={<StatusView orderId={orderId} />} />
             <Route path="/admin" element={<AdminView />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
