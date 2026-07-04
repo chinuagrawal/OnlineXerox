@@ -21,6 +21,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { v4 as uuidv4 } from "uuid";
+import { PDFDocument } from "pdf-lib";
 
 import {
   Menu,
@@ -48,6 +49,7 @@ import {
   Droplets,
   Armchair,
   X,
+  Scissors,
 } from "lucide-react";
 
 // --- Components ---
@@ -75,6 +77,7 @@ const Header = () => {
           {[
             { id: "/", label: "Home" },
             { id: "/upload", label: "Upload" },
+            { id: "/meesho-crop", label: "Meesho Crop" },
             { id: "/status", label: "Orders" },
             { id: "/admin", label: "Admin" },
           ].map((item) => (
@@ -141,6 +144,7 @@ const MobileNav = () => {
       {[
         { id: "/", label: "Home", icon: Menu },
         { id: "/upload", label: "Upload", icon: CloudUpload },
+        { id: "/meesho-crop", label: "Meesho Crop", icon: Scissors },
         { id: "/status", label: "Orders", icon: ReceiptText },
         { id: "/admin", label: "Admin", icon: Settings },
       ].map((item) => (
@@ -162,6 +166,402 @@ const MobileNav = () => {
 };
 
 // --- Views ---
+
+const MeeshoCropView = ({ onNext }: { onNext: (data: any) => void }) => {
+  const [copies, setCopies] = useState(1);
+  const [colorMode, setColorMode] = useState<"color" | "bw">("bw");
+  const [paper, setPaper] = useState<"a4" | "a3">("a4");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [printers, setPrinters] = useState<string[]>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
+  const [cropType, setCropType] = useState<"label" | "a4">("label");
+  const [labelsPerPage, setLabelsPerPage] = useState(4);
+  const [processedPdf, setProcessedPdf] = useState<Uint8Array | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch available printers from Firestore
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, "system", "printers"),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          const availablePrinters = data?.available || [];
+          setPrinters(availablePrinters);
+          if (availablePrinters.length > 0 && !selectedPrinter) {
+            setSelectedPrinter(availablePrinters[0]);
+          }
+        }
+      },
+    );
+    return unsubscribe;
+  }, [selectedPrinter]);
+
+  const processPdf = async (file: File) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      const pages = pdfDoc.getPages();
+
+      // For this example, let's just copy the pages (you can add actual cropping logic later)
+      const newPdfDoc = await PDFDocument.create();
+      for (const page of pages) {
+        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [0]);
+        newPdfDoc.addPage(copiedPage);
+      }
+
+      const pdfBytes = await newPdfDoc.save();
+      setProcessedPdf(pdfBytes);
+    } catch (error) {
+      console.error("Error processing PDF:", error);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      setFile(selectedFile);
+      processPdf(selectedFile);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!processedPdf) return;
+    setUploading(true);
+
+    const orderId = `ORD-${uuidv4().slice(0, 8).toUpperCase()}`;
+    const fileName = file ? `cropped_${file.name}` : "cropped_label.pdf";
+
+    // Create a Blob from processedPdf
+    const pdfBlob = new Blob([processedPdf], { type: "application/pdf" });
+
+    // Upload to Firebase Storage
+    const storageRef = ref(storage, `prints/${orderId}/${fileName}`);
+    const uploadTask = uploadBytesResumable(storageRef, pdfBlob);
+
+    uploadTask.on(
+      "state_changed",
+      (snapshot) => {
+        const progress =
+          (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        setProgress(progress);
+      },
+      (error) => {
+        console.error(error);
+        setUploading(false);
+      },
+      async () => {
+        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+        const orderData = {
+          orderId,
+          fileName,
+          fileUrl: downloadURL,
+          copies,
+          colorMode,
+          paper,
+          printer: selectedPrinter,
+          status: "queued",
+          paymentStatus: "paid",
+          createdAt: serverTimestamp(),
+          amount: (2.4 * copies + 1.2 * copies + 0.5).toFixed(2),
+        };
+
+        // Save order directly to Firestore
+        try {
+          const ordersRef = collection(db, "orders");
+          await addDoc(ordersRef, orderData);
+          onNext(orderData);
+        } catch (err) {
+          console.error("Firestore Error:", err);
+        }
+
+        setUploading(false);
+      },
+    );
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      className="pt-24 pb-32 px-6 max-w-7xl mx-auto grid lg:grid-cols-12 gap-8"
+    >
+      <div className="lg:col-span-8 space-y-8">
+        <section>
+          <span className="text-primary font-bold tracking-widest uppercase text-xs mb-2 block">
+            Meesho Label Crop
+          </span>
+          <h1 className="text-5xl font-extrabold tracking-tight text-slate-900 mb-4">
+            Crop & Print Labels
+          </h1>
+          <p className="text-slate-500 text-lg max-w-2xl leading-relaxed">
+            Upload your Meesho shipping label PDF, crop it, and print directly.
+          </p>
+        </section>
+
+        <div className="bg-slate-50 rounded-2xl p-1 border border-slate-200">
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileChange}
+            accept="application/pdf"
+          />
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-white border-2 border-dashed border-slate-200 rounded-xl p-12 flex flex-col items-center justify-center text-center group hover:border-primary transition-colors cursor-pointer"
+          >
+            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <Scissors className="w-8 h-8 text-primary" />
+            </div>
+            <h3 className="text-xl font-bold mb-2">
+              {file ? file.name : "Upload Meesho Label PDF"}
+            </h3>
+            <p className="text-slate-400 mb-8 max-w-xs">
+              Drag and drop or click to upload your Meesho shipping label PDF
+            </p>
+            <button className="px-8 py-3 signature-gradient text-white font-bold rounded-xl shadow-xl active:scale-95 transition-all">
+              {file ? "Change File" : "Browse Files"}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
+            <div className="flex items-center gap-3 mb-8">
+              <Settings2 className="w-5 h-5 text-primary" />
+              <h3 className="text-lg font-bold">Crop & Print Settings</h3>
+            </div>
+            <div className="space-y-8">
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Crop Type
+                </label>
+                <div className="flex bg-slate-200 p-1 rounded-full">
+                  <button
+                    onClick={() => setCropType("label")}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${cropType === "label" ? "bg-white shadow-sm text-primary" : "text-slate-500"}`}
+                  >
+                    Label Printer
+                  </button>
+                  <button
+                    onClick={() => setCropType("a4")}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${cropType === "a4" ? "bg-white shadow-sm text-primary" : "text-slate-500"}`}
+                  >
+                    A4 Printer
+                  </button>
+                </div>
+              </div>
+
+              {cropType === "a4" && (
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Labels Per Page
+                  </label>
+                  <select
+                    value={labelsPerPage}
+                    onChange={(e) => setLabelsPerPage(Number(e.target.value))}
+                    className="w-full p-4 bg-slate-50 border-none rounded-xl font-bold text-sm focus:ring-2 focus:ring-primary/20"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((num) => (
+                      <option key={num} value={num}>
+                        {num}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Select Printer
+                </label>
+                <select
+                  value={selectedPrinter}
+                  onChange={(e) => setSelectedPrinter(e.target.value)}
+                  className="w-full p-4 bg-slate-50 border-none rounded-xl font-bold text-sm focus:ring-2 focus:ring-primary/20"
+                >
+                  {printers.map((printer, index) => (
+                    <option key={index} value={printer}>
+                      {printer}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+                <div>
+                  <p className="font-bold text-sm">Color Mode</p>
+                  <p className="text-xs text-slate-400">
+                    Full spectrum or monochrome
+                  </p>
+                </div>
+                <div className="flex bg-slate-200 p-1 rounded-full">
+                  <button
+                    onClick={() => setColorMode("color")}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${colorMode === "color" ? "bg-white shadow-sm text-primary" : "text-slate-500"}`}
+                  >
+                    Color
+                  </button>
+                  <button
+                    onClick={() => setColorMode("bw")}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${colorMode === "bw" ? "bg-white shadow-sm text-primary" : "text-slate-500"}`}
+                  >
+                    B&W
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Number of Copies
+                </label>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setCopies(Math.max(1, copies - 1))}
+                    className="w-10 h-10 flex items-center justify-center bg-slate-100 rounded-full hover:bg-slate-200 transition-all"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <span className="w-12 text-center font-bold text-xl">
+                    {copies}
+                  </span>
+                  <button
+                    onClick={() => setCopies(copies + 1)}
+                    className="w-10 h-10 flex items-center justify-center bg-primary text-white rounded-full hover:bg-primary-container transition-all shadow-md"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Paper Dimension
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setPaper("a4")}
+                    className={`p-4 rounded-xl border-2 transition-all font-bold ${paper === "a4" ? "border-primary bg-primary/5 text-primary" : "border-transparent bg-slate-50 text-slate-400"}`}
+                  >
+                    A4 Standard
+                  </button>
+                  <button
+                    onClick={() => setPaper("a3")}
+                    className={`p-4 rounded-xl border-2 transition-all font-bold ${paper === "a3" ? "border-primary bg-primary/5 text-primary" : "border-transparent bg-slate-50 text-slate-400"}`}
+                  >
+                    A3 Premium
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
+            <div className="flex items-center gap-3 mb-8">
+              <BookOpen className="w-5 h-5 text-primary" />
+              <h3 className="text-lg font-bold">Preview</h3>
+            </div>
+            <div className="space-y-6">
+              {processedPdf ? (
+                <div className="bg-slate-50 rounded-xl p-4 text-center">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-emerald-600">
+                    PDF Processed Successfully!
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-slate-50 rounded-xl p-12 text-center">
+                  <p className="text-slate-400">
+                    Processed PDF will appear here
+                  </p>
+                </div>
+              )}
+              <div className="p-4 bg-primary/5 rounded-xl border-l-4 border-primary">
+                <p className="text-xs text-primary font-bold mb-1 uppercase tracking-widest">
+                  Quick Note
+                </p>
+                <p className="text-sm font-medium text-slate-600 leading-relaxed">
+                  Standard 80gsm paper will be used for A4 prints unless
+                  otherwise specified.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside className="lg:col-span-4 lg:sticky lg:top-24 h-fit space-y-6">
+        <div className="bg-slate-200 p-8 rounded-2xl relative overflow-hidden">
+          <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter z-10 shadow-sm">
+            Live Preview
+          </div>
+          <div className="aspect-[3/4] bg-white ambient-shadow rounded-sm mx-auto p-8 flex flex-col gap-4 opacity-40 select-none">
+            <div className="h-4 bg-slate-200 w-3/4 rounded" />
+            <div className="h-2 bg-slate-100 w-full rounded" />
+            <div className="h-2 bg-slate-100 w-full rounded" />
+            <div className="h-2 bg-slate-100 w-5/6 rounded" />
+            <div className="flex-1 w-full bg-slate-50 rounded-lg flex items-center justify-center">
+              <ReceiptText className="w-12 h-12 text-slate-200" />
+            </div>
+            <div className="h-2 bg-slate-100 w-full rounded" />
+          </div>
+          <div className="mt-6 flex justify-between items-center text-xs font-bold text-slate-500">
+            <span>meesho_label.pdf</span>
+            <span>1 Page</span>
+          </div>
+        </div>
+
+        <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
+          <h4 className="text-sm font-bold uppercase tracking-widest text-slate-400 mb-8">
+            Cost Estimation
+          </h4>
+          <div className="space-y-4 mb-10">
+            <div className="flex justify-between items-center text-sm font-medium">
+              <span className="text-slate-500">
+                {paper.toUpperCase()} Prints x {copies}
+              </span>
+              <span className="font-bold">${(2.4 * copies).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm font-medium">
+              <span className="text-slate-500">Color Surcharge</span>
+              <span className="font-bold">${(1.2 * copies).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm font-medium">
+              <span className="text-slate-500">Service Fee</span>
+              <span className="font-bold">$0.50</span>
+            </div>
+            <div className="pt-6 border-t border-slate-100 flex justify-between items-end">
+              <span className="font-bold text-slate-900">Total Estimated</span>
+              <span className="text-4xl font-black text-primary">
+                ${(2.4 * copies + 1.2 * copies + 0.5).toFixed(2)}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={handleUpload}
+            disabled={!processedPdf || uploading}
+            className={`w-full py-5 signature-gradient text-white font-bold rounded-xl shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 ${!processedPdf || uploading ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            {uploading ? (
+              <>
+                Uploading...{" "}
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              </>
+            ) : (
+              <>
+                Crop & Send to Printer <ArrowRight className="w-5 h-5" />
+              </>
+            )}
+          </button>
+        </div>
+      </aside>
+    </motion.div>
+  );
+};
 
 const LandingView = () => {
   const navigate = useNavigate();
@@ -1262,6 +1662,10 @@ export default function App() {
             <Route
               path="/upload"
               element={<UploadView onNext={handleUploadComplete} />}
+            />
+            <Route
+              path="/meesho-crop"
+              element={<MeeshoCropView onNext={handleUploadComplete} />}
             />
             <Route path="/status" element={<StatusView orderId={orderId} />} />
             <Route path="/admin" element={<AdminView />} />
